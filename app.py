@@ -8,12 +8,213 @@ from datetime import datetime
 # Page configuration
 st.set_page_config(
     page_title="Waterfowl Hunting Forecast",
-    page_icon="🦆",
+    page_icon="",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-st.title("🦆 California Waterfowl Hunting Forecast")
+# NAV CONFIGURATION - loadable/persisted via JSON + editable in sidebar admin
+from pathlib import Path
+import json
+
+CONFIG_PATH = Path("nav_config.json")
+
+DEFAULT_NAV_CONFIG = {
+    "brand": "California Waterfowl Hunting Forecast",
+    "nav_bg": "#0b6623",
+    "nav_border": "#084f1d",
+    "nav_links": [["Forecast", "#forecast"], ["Map", "#map"], ["About", "#about"]],
+    "mission_title": "Mission",
+    "mission_text": "Provide clear, data-driven forecasts and access to historical harvest data to help hunters plan ethically and safely.",
+    "sources_title": "Sources",
+    "sources_text": "15 years of California waterfowl harvest data (2006-2024). CSVs available in the project repository."
+}
+def load_nav_config():
+    if CONFIG_PATH.exists():
+        try:
+            with open(CONFIG_PATH, "r") as fh:
+                cfg = json.load(fh)
+            # ensure defaults for missing keys
+            for k, v in DEFAULT_NAV_CONFIG.items():
+                if k not in cfg:
+                    cfg[k] = v
+            return cfg
+        except Exception:
+            return DEFAULT_NAV_CONFIG.copy()
+    return DEFAULT_NAV_CONFIG.copy()
+
+
+def save_nav_config(cfg_dict):
+    try:
+        with open(CONFIG_PATH, "w") as fh:
+            json.dump(cfg_dict, fh, indent=2)
+        return True
+    except Exception:
+        return False
+
+# Load config at startup
+nav_config = load_nav_config()
+
+NAV_BRAND = nav_config["brand"]
+NAV_BG = nav_config["nav_bg"]
+NAV_BORDER = nav_config["nav_border"]
+NAV_LINKS = [tuple(item) for item in nav_config.get("nav_links", [])]
+
+MISSION_TITLE = nav_config["mission_title"]
+MISSION_TEXT = nav_config["mission_text"]
+SOURCES_TITLE = nav_config["sources_title"]
+SOURCES_TEXT = nav_config["sources_text"]
+
+# ------------------
+# Admin UI (sidebar) to edit nav settings and autosave to JSON
+# ------------------
+with st.sidebar.expander("Navbar settings (admin)", expanded=False):
+    st.write("Customize the top navigation bar. Changes autosave to nav_config.json when modified.")
+
+    brand_input = st.text_input("Brand text", value=NAV_BRAND)
+    bg_input = st.color_picker("Background color", value=NAV_BG)
+    border_input = st.color_picker("Border/accent color", value=NAV_BORDER)
+
+    links_default = "\n".join([f"{label}|{href}" for label, href in NAV_LINKS])
+    links_input = st.text_area("Links (one per line, format: Label|#anchor or URL)", value=links_default, height=80)
+
+    mission_title_input = st.text_input("Mission title", value=MISSION_TITLE)
+    mission_text_input = st.text_area("Mission text", value=MISSION_TEXT, height=100)
+
+    sources_title_input = st.text_input("Sources title", value=SOURCES_TITLE)
+    sources_text_input = st.text_area("Sources text", value=SOURCES_TEXT, height=100)
+
+    # Parse links here for both autosave and manual save
+    parsed_links_for_save = []
+    for line in (links_input or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if '|' in line:
+            label, href = line.split('|', 1)
+            parsed_links_for_save.append([label.strip(), href.strip()])
+        else:
+            label = line.strip()
+            href = f"#{label.replace(' ', '-').lower()}"
+            parsed_links_for_save.append([label, href])
+
+    # If nothing was provided, fall back to current links
+    if not parsed_links_for_save:
+        parsed_links_for_save = [[label, href] for label, href in NAV_LINKS]
+
+    cfg_to_write = {
+        "brand": brand_input,
+        "nav_bg": bg_input,
+        "nav_border": border_input,
+        "nav_links": parsed_links_for_save,
+        "mission_title": mission_title_input,
+        "mission_text": mission_text_input,
+        "sources_title": sources_title_input,
+        "sources_text": sources_text_input
+    }
+
+    # Autosave if config changed from last loaded config
+    try:
+        if cfg_to_write != nav_config:
+            ok = save_nav_config(cfg_to_write)
+            if ok:
+                st.info("Navbar settings autosaved")
+                # update in-memory config so autosave doesn't repeat unnecessarily
+                nav_config = cfg_to_write
+            else:
+                st.error("Autosave failed")
+    except Exception:
+        # Fall back silently in case of unexpected comparison errors
+        pass
+
+    # Manual Save / Reset buttons remain for explicit control
+    col_save, col_reset = st.columns([1, 1])
+    with col_save:
+        if st.button("Save navbar settings"):
+            ok = save_nav_config(cfg_to_write)
+            if ok:
+                st.success("Navbar settings saved to nav_config.json")
+                nav_config = cfg_to_write
+            else:
+                st.error("Failed to save navbar settings")
+    with col_reset:
+        if st.button("Reset to defaults"):
+            try:
+                if CONFIG_PATH.exists():
+                    CONFIG_PATH.unlink()
+                st.experimental_rerun()
+            except Exception:
+                st.error("Failed to reset configuration")
+
+# Parse links input (for immediate UI update even before save)
+parsed_links = []
+for line in (links_input or "").splitlines():
+    line = line.strip()
+    if not line:
+        continue
+    if '|' in line:
+        label, href = line.split('|', 1)
+        parsed_links.append((label.strip(), href.strip()))
+    else:
+        label = line.strip()
+        href = f"#{label.replace(' ', '-').lower()}"
+        parsed_links.append((label, href))
+
+# Use admin inputs if provided, otherwise fall back to loaded config
+NAV_BRAND = brand_input or NAV_BRAND
+NAV_BG = bg_input or NAV_BG
+NAV_BORDER = border_input or NAV_BORDER
+NAV_LINKS = parsed_links if parsed_links else NAV_LINKS
+MISSION_TITLE = mission_title_input or MISSION_TITLE
+MISSION_TEXT = mission_text_input or MISSION_TEXT
+SOURCES_TITLE = sources_title_input or SOURCES_TITLE
+SOURCES_TEXT = sources_text_input or SOURCES_TEXT
+
+# Build links HTML from NAV_LINKS
+links_html = '\n    '.join([f'<a href="{href}">{label}</a>' for label, href in NAV_LINKS])
+
+# Rebuild nav HTML using the (possibly updated) variables
+nav_html = f"""
+<style>
+.navbar{{position:fixed;top:0;left:0;right:0;background-color:{NAV_BG};color:#fff;z-index:9999;padding:8px 16px;display:flex;align-items:center;justify-content:space-between;font-family:Arial, sans-serif;border-bottom:4px solid {NAV_BORDER}}}
+.navbar .brand{{font-weight:700;font-size:18px}}
+.navbar .menu{{display:flex;gap:12px;align-items:center}}
+.navbar a{{color:#fff;text-decoration:none;padding:6px 8px;border-radius:4px}}
+.navbar .dropdown{{position:relative}}
+.navbar .dropdown-content{{display:none;position:absolute;top:36px;left:0;background:{NAV_BG};min-width:260px;padding:12px;border-radius:6px;box-shadow:0 4px 8px rgba(0,0,0,0.2)}}
+.navbar .dropdown:hover .dropdown-content{{display:block}}
+.navbar .dropdown-content p{{margin:0;color:#e6f5ea}}
+.main-content{{padding-top:68px}}
+.navbar a:hover{{background:rgba(255,255,255,0.06)}}
+@media (max-width:600px){{.navbar{{flex-direction:column;align-items:flex-start}}.navbar .menu{{flex-wrap:wrap}}}}
+</style>
+
+<div class="navbar">
+  <div class="brand">{NAV_BRAND}</div>
+  <div class="menu">
+    {links_html}
+    <div class="dropdown">
+      <a href="javascript:void(0)">{MISSION_TITLE} ▾</a>
+      <div class="dropdown-content">
+        <p><strong>{MISSION_TITLE}</strong></p>
+        <p>{MISSION_TEXT}</p>
+      </div>
+    </div>
+    <div class="dropdown">
+      <a href="javascript:void(0)">{SOURCES_TITLE} ▾</a>
+      <div class="dropdown-content">
+        <p><strong>Data Sources</strong></p>
+        <p>{SOURCES_TEXT}</p>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="main-content"></div>
+"""
+
+st.markdown(nav_html, unsafe_allow_html=True)
+
+st.title("California Waterfowl Hunting Forecast!")
 st.markdown("Interactive tool to predict hunting activity based on 15 years of harvest data")
 
 # ============================================================================
@@ -265,7 +466,7 @@ def predict_activity(date, location, historical_df, master_data_df):
 # SIDEBAR - INPUTS
 # ============================================================================
 
-st.sidebar.header("🎯 Forecast Settings")
+st.sidebar.header("Forecast Settings")
 
 date = st.sidebar.date_input(
     "Select Date",
@@ -286,7 +487,8 @@ location = st.sidebar.selectbox(
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    st.subheader("📊 Activity Forecast")
+    st.markdown('<a id="forecast"></a>', unsafe_allow_html=True)
+    st.subheader("Activity Forecast")
     
     prediction = predict_activity(date, location, historical, master_data)
     
@@ -348,6 +550,7 @@ with col2:
 # MAP VIEW
 # ============================================================================
 
+st.markdown('<a id="map"></a>', unsafe_allow_html=True)
 st.subheader("🗺️ Interactive Map - All Refuges (Season Week {})".format(
     calculate_season_week(date)
 ))
@@ -404,6 +607,10 @@ for _, row in week_data.iterrows():
 
 # Display map
 st_folium(m, width=700, height=500)
+
+st.markdown('<a id="about"></a>', unsafe_allow_html=True)
+st.subheader("About")
+st.markdown("This application compiles and visualizes 15 years of California waterfowl harvest data to produce weekly forecasts and reference maps. See project documentation for details and data sources.")
 
 # ============================================================================
 # FOOTER - DATA INFO
